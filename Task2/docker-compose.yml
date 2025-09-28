@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:latest
+    container_name: postgres-db
+    restart: always
+    env_file: .env
+    ports:
+    - "${POSTGRES_PORT}:5432"
+    volumes:
+    - db_data:/var/lib/postgresql/data
+    - ./sql:/sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  pgadmin:
+    image: dpage/pgadmin4:7
+    container_name: pgadmin
+    restart: always
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+    - "5050:80"
+    depends_on:
+    - db
+
+  flyway:
+    image: flyway/flyway:latest
+    container_name: flyway-migration
+    command: -url=jdbc:postgresql://db:5432/${POSTGRES_DB} -user=${POSTGRES_USER} -password=${POSTGRES_PASSWORD} -locations=filesystem:/flyway/sql/migrations migrate
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+    - ./sql:/flyway/sql
+
+volumes:
+  db_data:
