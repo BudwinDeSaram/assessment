@@ -1,0 +1,104 @@
+trigger: 
+  - main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  - name: POSTGRES_USER
+    value: $(POSTGRES_USER)
+  - name: POSTGRES_PASSWORD
+    value: $(POSTGRES_PASSWORD)
+  - name: POSTGRES_DB
+    value: $(POSTGRES_DB)
+  - name: POSTGRES_PORT
+    value: '5432'
+
+stages:
+  - stage: Build
+    displayName: 'Build and test'
+    jobs:
+    - job: BuildJob
+      displayName: 'Build and test'
+      steps:
+      - task: Checkout@1
+        displayName: 'Checkout source code'
+      
+      - script: |
+          echo "Validating docker-compose.yml syntax..."
+          docker compose config
+        displayName: 'Validate Docker Compose configuration'
+            
+      - script: |
+          docker compose up -d
+          echo "Waiting for database to be ready..."
+          timeout 60 bash -c 'until docker exec postgres-db pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB); do sleep 2; done'
+        displayName: 'Start test database'
+      
+      - script: |
+          docker compose run --rm flyway
+        displayName: 'Apply database migrations'
+      
+      - script: |
+          docker exec -i postgres-db psql \
+            -U $(POSTGRES_USER) \
+            -d $(POSTGRES_DB) \
+            -f /sql/seed/seed_data.sql
+        displayName: 'Seed test data'
+      
+      - script: |
+          chmod +x Tests/validation.sh
+          ./Tests/validation.sh
+        displayName: 'Run validation tests'
+        name: 'validation'
+      
+      - script: |
+          chmod +x scripts/rollback.sh
+          ./scripts/rollback.sh
+        displayName: 'Rollback on test failure'
+        condition: failed()
+      
+      - script: |
+          docker compose down -v
+        displayName: 'Cleanup test environment'
+        condition: always()
+
+  - stage: Deploy
+    displayName: 'Deploy Stage'
+    dependsOn: Build
+    condition: succeeded()
+    jobs:
+    - deployment: DeployToProd
+      displayName: 'Deploy to Production'
+      environment: 'production'
+      strategy:
+        runOnce:
+          deploy:
+            steps:
+            - task: Checkout@1
+              displayName: 'Checkout source code'
+            
+            - script: |
+                docker compose up -d
+                echo "Waiting for production database to be ready..."
+                timeout 60 bash -c 'until docker exec postgres-db pg_isready -U $(POSTGRES_USER) -d $(POSTGRES_DB); do sleep 2; done'
+              displayName: 'Start production database'
+            
+            - script: |
+                docker compose run --rm flyway
+              displayName: 'Apply production migrations'
+            
+            - script: |
+                docker exec -i postgres-db psql \
+                  -U $(POSTGRES_USER) \
+                  -d $(POSTGRES_DB) \
+                  -f /sql/seed/seed_data.sql
+              displayName: 'Seed production data'
+            
+            - script: |
+                echo "Production deployment completed successfully!"
+                echo "Services are running and accessible:"
+                echo "- Database: localhost:$(POSTGRES_PORT)"
+                echo "- PgAdmin: localhost:5050"
+                docker compose ps
+              displayName: 'Production deployment summary'
