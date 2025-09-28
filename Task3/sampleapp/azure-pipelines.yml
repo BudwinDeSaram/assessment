@@ -1,0 +1,157 @@
+trigger:
+- main
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+variables:
+  dockerRegistry: 'my-registry.azurecr.io'
+  imageName: 'sampleapp'
+  imageTag: '$(Build.BuildId)'
+  helmChartPath: '$(System.DefaultWorkingDirectory)'
+  kubernetesServiceConnection: 'my-k8s-connection'
+
+stages:
+- stage: Build
+  displayName: 'Build, Test and Package'
+  jobs:
+  - job: BuildJob
+    displayName: 'Build Application'
+    steps:    
+    - task: Docker@2
+      displayName: 'Build and Push Docker Image'
+      inputs:
+        command: 'buildAndPush'
+        containerRegistry: '$(dockerRegistry)'
+        repository: '$(imageName)'
+        Dockerfile: '$(System.DefaultWorkingDirectory)/Dockerfile' 
+        tags: |
+          $(imageTag)
+          latest
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Helm Chart'
+      inputs:
+        pathToPublish: '$(System.DefaultWorkingDirectory)'
+        artifactName: 'helm-chart'
+        publishLocation: 'container'
+
+- stage: Deploy
+  displayName: 'Deploy using Helm'
+  dependsOn: Build
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+  jobs:
+  - deployment: DeployToDev
+    displayName: 'Deploy to Development Environment'
+    environment: 'development'
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Helm Chart'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'helm-chart'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: 'latest'
+
+          - task: HelmDeploy@0
+            displayName: 'Deploy to Development with Helm'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'development'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(System.ArtifactsDirectory)/helm-chart'
+              releaseName: 'sampleapp-dev'
+              arguments: '--install --wait --timeout=300s'
+              valueFile: '$(System.ArtifactsDirectory)/helm-chart/values-dev.yaml'
+              overrideValues: |
+                image.repository=$(dockerRegistry)/$(imageName)
+                image.tag=$(imageTag)
+                image.pullPolicy=Always
+
+  - deployment: DeployToStaging
+    displayName: 'Deploy to Staging Environment'
+    environment: 'staging'
+    dependsOn: DeployToDev
+    condition: succeeded()
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Helm Chart'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'helm-chart'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: 'latest'
+
+          - task: HelmDeploy@0
+            displayName: 'Deploy to Staging with Helm'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'staging'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(System.ArtifactsDirectory)/helm-chart'
+              releaseName: 'sampleapp-staging'
+              arguments: '--install --wait --timeout=300s'
+              valueFile: '$(System.ArtifactsDirectory)/helm-chart/values-staging.yaml'
+              overrideValues: |
+                image.repository=$(dockerRegistry)/$(imageName)
+                image.tag=$(imageTag)
+                image.pullPolicy=Always
+
+  - deployment: DeployToProd
+    displayName: 'Deploy to Production Environment'
+    environment: 'production'
+    dependsOn: DeployToStaging
+    condition: succeeded()
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadBuildArtifacts@1
+            displayName: 'Download Helm Chart'
+            inputs:
+              buildType: 'current'
+              downloadType: 'single'
+              artifactName: 'helm-chart'
+              downloadPath: '$(System.ArtifactsDirectory)'
+
+          - task: HelmInstaller@1
+            displayName: 'Install Helm'
+            inputs:
+              helmVersionToInstall: 'latest'
+
+          - task: HelmDeploy@0
+            displayName: 'Deploy to Production with Helm'
+            inputs:
+              connectionType: 'Kubernetes Service Connection'
+              kubernetesServiceConnection: '$(kubernetesServiceConnection)'
+              namespace: 'production'
+              command: 'upgrade'
+              chartType: 'FilePath'
+              chartPath: '$(System.ArtifactsDirectory)/helm-chart'
+              releaseName: 'sampleapp-prod'
+              arguments: '--install --wait --timeout=300s'
+              valueFile: '$(System.ArtifactsDirectory)/helm-chart/values-prod.yaml'
+              overrideValues: |
+                image.repository=$(dockerRegistry)/$(imageName)
+                image.tag=$(imageTag)
+                image.pullPolicy=Always
