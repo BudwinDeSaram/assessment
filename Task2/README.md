@@ -101,13 +101,10 @@ The Azure DevOps pipeline (`azure-pipelines.yml`) implements a **three-stage dep
 ### Rollback Process (`scripts/rollback.sh`)
 1. **Load credentials** from `.env` file
 2. **Check database state** - query Flyway migration history
-3. **Drop all tables** in correct order (handles foreign key dependencies)
+3. **Drop all tables** in correct order since initial state is empty
    - Book (dependent table)
    - Author, Publisher (parent tables)  
    - flyway_schema_history (tracking table)
 4. **Cleanup containers** and volumes
 5. **Provide feedback** on rollback completion
-
-### Rollback Safety
-- **Test Environment**: Full rollback including container cleanup
-- **Production Environment**: Rollback disabled to prevent accidental data loss
+6. Could include backup database and rollback the last version as am improvement.
