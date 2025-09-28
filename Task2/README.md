@@ -3,13 +3,12 @@
 
 A complete database management solution with automated migrations, testing, and deployment using Docker, Flyway, and Azure DevOps.
 
-```# Run validation test
+```
+# Run validation test
 
 make validate
-
+```
 ## Database Schema & Migration Logic
-
-# Tear down everything
 
 ### Schema Designmake down
 
@@ -54,7 +53,7 @@ make down
 ### Manual Docker Commands
 ```bash
 # Alternative to Makefile commands
-docker compose up -d db
+docker compose up -d 
 docker compose run --rm flyway
 docker exec -i postgres-db psql -U postgres -d booksdb -f /sql/seed/seed_data.sql
 ```
